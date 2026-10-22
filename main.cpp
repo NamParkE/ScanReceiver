@@ -62,7 +62,6 @@ enum : int {
     IDC_AUTOSTART,
     IDC_TOTRAY,
     IDC_STARTSTOP,
-    IDC_STATUS,
     IDC_COPYADDR,
     IDC_SHOWLOG,
     IDC_SHOWFILES,
