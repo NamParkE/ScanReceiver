@@ -1,0 +1,18 @@
+# Build output (also holds ScanReceiver.ini, which stores the FTP password in plain text)
+build/
+*.obj
+*.res
+*.o
+*.exe
+*.pdb
+*.ilk
+
+# Runtime settings
+ScanReceiver.ini
+
+# CMake / IDE
+CMakeFiles/
+CMakeCache.txt
+out/
+.vs/
+.vscode/

@@ -1,0 +1,5 @@
+* text=auto
+# cmd.exe mis-parses labels in LF batch files
+*.bat text eol=crlf
+*.ico binary
+*.png binary
