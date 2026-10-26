@@ -60,8 +60,9 @@ test\build_wintool.bat                      :: 화면 확인용 도구 → test\
 - 위젯·설정 창은 **테두리 없는 창**: `WS_POPUP | WS_THICKFRAME` + `WM_NCCALCSIZE`에서 0 → DWM이 둥근 모서리·테두리·그림자. 머리글(36px)은 `HTCAPTION`(끌어서 이동), 크기 조절 없음. 위젯 머리글 우클릭 = 트레이 메뉴.
 - 위젯 레이아웃 상수는 `kW`, `kHeaderH`, `kCardTop`… (260×300). 상태 카드는 `PaintMain`이 그리고, 스위치·복사·톱니·✕·아래 링크 버튼만 자식 창.
 - 받은 파일 목록은 직접 그린 자식 창(`ListProc`, 클래스 `ScanReceiverFileList`): 30px 줄 4개, 휠 스크롤(위젯 어디서 굴려도 목록으로 전달), 더블클릭 열기, 우클릭 메뉴(열기/폴더에서 보기/목록 지우기). 데이터는 `g.files`(최신이 앞).
-- 아이콘 글리프는 `Segoe Fluent Icons`(없으면 `Segoe MDL2 Assets`, 코드 포인트 같음)를 GDI 폰트로, ClearType 색 번짐 때문에 `ANTIALIASED_QUALITY`.
-- 상태 카드에 마우스를 0.45초 올리면 스캐너 설정 카드(`TipProc`, 클래스 `ScanReceiverTip`)가 위젯 옆에 뜸. 시스템 툴팁은 위젯 내용을 가려서 바꿈(2026-10-26 사용자 요청). 글자는 Segoe UI 14px/12px ClearType(시스템 9pt 글꼴은 흐릿하다는 의견).
+- **글자는 DirectWrite**(QuickLinks와 같음): `MakeFont`가 GDI 글꼴(입력칸·로그 목록 같은 기본 컨트롤용)과 같은 크기의 DirectWrite 텍스트 형식을 짝지어 만들고, 손으로 그리는 글자는 전부 `DrawTextIn`/`TextWidth`가 공용 `ID2D1DCRenderTarget`(96 DPI, 크기는 px)으로 그림. 글꼴은 Segoe UI Variable Text(없으면 Segoe UI) + 한글은 맑은 고딕 자동 대체, 14px 본문 / 12px 보조, 12px 미만 금지. 2026-10-26 GDI 맑은 고딕이 얇고 각져 "밤티" 난다는 의견 → 5가지 글꼴·방식 비교 후 사용자가 이 조합 선택(프리텐다드는 기본 Windows에 없어서 제외). 설정 창 이름표도 STATIC 대신 직접 그림(`g.setLabels`).
+- 아이콘 글리프는 `Segoe Fluent Icons`(없으면 `Segoe MDL2 Assets`, 코드 포인트 같음), ClearType 색 번짐 때문에 그레이스케일.
+- 상태 카드에 마우스를 0.45초 올리면 스캐너 설정 카드(`TipProc`, 클래스 `ScanReceiverTip`)가 위젯 옆에 뜸. 시스템 툴팁은 위젯 내용을 가려서 바꿈(2026-10-26 사용자 요청).
 - 직접 그리는 컨트롤: `BtnInfo`(Primary/Secondary/Subtle/Switch/Icon/Link/Check) + `ButtonSubclass`(호버 추적, 스위치·체크는 BN_CLICKED 전에 토글) + `DrawButton`(GDI+ 안티앨리어싱, 글자는 GDI ClearType). 서버 스위치는 클릭 후 `UpdateUi`가 실제 서버 상태로 다시 맞춤(시작 실패 시 꺼짐으로 돌아옴).
 - 설정 창 입력칸: 테두리 없는 EDIT를 `PlaceField`가 30px 상자 안에 배치하고 `PaintSettings`가 Fluent 텍스트 박스(포커스 시 2px 강조 밑줄)를 그림. Enter = 저장, Esc = 취소(`IsDialogMessage`의 IDOK/IDCANCEL). 저장 시 서버가 쓰는 값이 바뀌었고 실행 중이면 서버를 다시 시작.
 - 토스트(T4): 썸네일은 작업 스레드에서 `IShellItemImageFactory::GetImage(SIIGBF_THUMBNAILONLY)` → `WM_APP_THUMB`(그 사이엔 파일 형식 아이콘). 알파 없는 썸네일은 `StretchBlt`, 알파 있으면 `AlphaBlend`(msimg32). 파일 토스트 5초, 안내 토스트 3초, 마우스를 올리면 유지. 링크(열기/폴더에서 보기) 위에서 손 모양 커서.

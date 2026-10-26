@@ -9,6 +9,8 @@
 #include "ftp_server.h"
 
 #include <commctrl.h>
+#include <d2d1.h>
+#include <dwrite.h>
 #include <dwmapi.h>
 #include <shellapi.h>
 #include <shlobj.h>
@@ -45,6 +47,8 @@ using std::min;
 #pragma comment(lib, "advapi32.lib")
 #pragma comment(lib, "gdiplus.lib")
 #pragma comment(lib, "msimg32.lib")
+#pragma comment(lib, "d2d1.lib")
+#pragma comment(lib, "dwrite.lib")
 #endif
 
 namespace {
@@ -225,8 +229,8 @@ struct Controls {
     // main widget
     HWND startStop, copyAddr, settings, close, openDir, showLog, list;
     // settings window
-    HWND lblRoot, root, browse, lblPort, port, lblPasv, pasvMin, lblTilde, pasvMax;
-    HWND lblUser, user, lblPass, pass, showPass, anon, autoStart, toTray, runAtLogon, save, cancel, setClose;
+    HWND root, browse, port, pasvMin, pasvMax;
+    HWND user, pass, showPass, anon, autoStart, toTray, runAtLogon, save, cancel, setClose;
     // log window
     HWND verbose, clearLog, log;
 };
@@ -243,6 +247,21 @@ struct BtnInfo {
     bool danger = false;    // Icon: red on hover (close)
     bool bordered = false;  // Icon: Secondary-style box (folder picker)
     bool bold = false;      // Link
+};
+
+// Text is drawn with DirectWrite (like QuickLinks): each GDI font has a matching text format.
+// The GDI font stays for standard controls (edits, log list) and as a fallback.
+struct TextFmt {
+    IDWriteTextFormat* fmt = nullptr;
+    IDWriteInlineObject* ellipsis = nullptr;
+    bool icon = false;  // glyph icons: grayscale, ClearType colour fringes look wrong on them
+};
+
+struct Label {
+    std::wstring text;
+    RECT rc;
+    COLORREF color;
+    UINT align;
 };
 
 struct Settings {
@@ -290,6 +309,12 @@ struct App {
     HICON icon = nullptr;       // large (Alt+Tab, taskbar)
     HICON iconSmall = nullptr;  // tray, toast header: the 16/20/24 px frame, not a shrunken 32 px one
     HIMAGELIST sysImages = nullptr;
+    ID2D1Factory* d2d = nullptr;
+    IDWriteFactory* dw = nullptr;
+    ID2D1DCRenderTarget* rt = nullptr;
+    ID2D1SolidColorBrush* brush = nullptr;
+    std::map<HFONT, TextFmt> fmts;
+    std::vector<Label> setLabels;  // settings window labels, painted
     int dpi = 96;
     int fontH = 16;
     std::vector<std::pair<HWND, RECT>> fields;  // settings edit -> the box painted around it
@@ -724,20 +749,99 @@ void FillSolid(HDC dc, const RECT& rc, COLORREF c) {
     DeleteObject(b);
 }
 
+bool CreateTextTarget() {
+    auto props = D2D1::RenderTargetProperties(D2D1_RENDER_TARGET_TYPE_DEFAULT,
+                                              D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE), 96, 96);
+    if (!g.d2d || FAILED(g.d2d->CreateDCRenderTarget(&props, &g.rt))) return false;
+    return SUCCEEDED(g.rt->CreateSolidColorBrush(D2D1::ColorF(0), &g.brush));
+}
+
+void ReleaseTextTarget() {
+    if (g.brush) g.brush->Release();
+    if (g.rt) g.rt->Release();
+    g.brush = nullptr;
+    g.rt = nullptr;
+}
+
+// One line of text, vertically centred in rc. fmt takes DT_CENTER / DT_RIGHT / DT_END_ELLIPSIS.
+// Sizes are in pixels: the render target runs at 96 DPI and formats are created at S(px).
 void DrawTextIn(HDC dc, const std::wstring& s, RECT rc, HFONT font, COLORREF color, UINT fmt) {
-    HGDIOBJ old = SelectObject(dc, font);
-    SetBkMode(dc, TRANSPARENT);
-    SetTextColor(dc, color);
-    DrawTextW(dc, s.c_str(), -1, &rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | fmt);
-    SelectObject(dc, old);
+    auto it = g.fmts.find(font);
+    if (it == g.fmts.end() || !g.rt || rc.right <= rc.left || rc.bottom <= rc.top) {
+        HGDIOBJ old = SelectObject(dc, font);
+        SetBkMode(dc, TRANSPARENT);
+        SetTextColor(dc, color);
+        DrawTextW(dc, s.c_str(), -1, &rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | fmt);
+        SelectObject(dc, old);
+        return;
+    }
+    TextFmt& t = it->second;
+    t.fmt->SetTextAlignment(fmt & DT_CENTER  ? DWRITE_TEXT_ALIGNMENT_CENTER
+                            : fmt & DT_RIGHT ? DWRITE_TEXT_ALIGNMENT_TRAILING
+                                             : DWRITE_TEXT_ALIGNMENT_LEADING);
+    t.fmt->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+    bool trim = fmt & (DT_END_ELLIPSIS | DT_PATH_ELLIPSIS);
+    DWRITE_TRIMMING trimming = {trim ? DWRITE_TRIMMING_GRANULARITY_CHARACTER : DWRITE_TRIMMING_GRANULARITY_NONE, 0, 0};
+    t.fmt->SetTrimming(&trimming, trim ? t.ellipsis : nullptr);
+    if (FAILED(g.rt->BindDC(dc, &rc))) return;
+    g.rt->BeginDraw();
+    g.rt->SetTextAntialiasMode(t.icon ? D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE : D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE);
+    g.brush->SetColor(D2D1::ColorF(GetRValue(color) / 255.f, GetGValue(color) / 255.f, GetBValue(color) / 255.f));
+    g.rt->DrawTextW(s.c_str(), (UINT32)s.size(), t.fmt,
+                    D2D1::RectF(0, 0, (float)(rc.right - rc.left), (float)(rc.bottom - rc.top)), g.brush,
+                    D2D1_DRAW_TEXT_OPTIONS_CLIP);
+    if (g.rt->EndDraw() == D2DERR_RECREATE_TARGET) {
+        ReleaseTextTarget();
+        CreateTextTarget();
+    }
 }
 
 int TextWidth(HDC dc, const std::wstring& s, HFONT font) {
+    auto it = g.fmts.find(font);
+    IDWriteTextLayout* layout = nullptr;
+    if (it != g.fmts.end() &&
+        SUCCEEDED(g.dw->CreateTextLayout(s.c_str(), (UINT32)s.size(), it->second.fmt, 10000, 1000, &layout))) {
+        DWRITE_TEXT_METRICS m{};
+        layout->GetMetrics(&m);
+        layout->Release();
+        return (int)std::ceil(m.widthIncludingTrailingWhitespace);
+    }
     HGDIOBJ old = SelectObject(dc, font);
     SIZE sz{};
     GetTextExtentPoint32W(dc, s.c_str(), (int)s.size(), &sz);
     SelectObject(dc, old);
     return sz.cx;
+}
+
+bool DWriteHasFamily(const wchar_t* name) {
+    IDWriteFontCollection* fonts = nullptr;
+    BOOL exists = FALSE;
+    UINT32 index = 0;
+    if (SUCCEEDED(g.dw->GetSystemFontCollection(&fonts))) {
+        fonts->FindFamilyName(name, &index, &exists);
+        fonts->Release();
+    }
+    return exists != FALSE;
+}
+
+// A GDI font (for standard controls) plus its DirectWrite twin (for everything drawn by hand).
+HFONT MakeFont(int px, int weight, const wchar_t* gdiFace, const wchar_t* dwFace, bool icon = false) {
+    LOGFONTW lf{};
+    lf.lfHeight = -S(px);
+    lf.lfWeight = weight;
+    lf.lfCharSet = DEFAULT_CHARSET;
+    lf.lfQuality = icon ? ANTIALIASED_QUALITY : CLEARTYPE_QUALITY;
+    lstrcpyW(lf.lfFaceName, gdiFace);
+    HFONT h = CreateFontIndirectW(&lf);
+    TextFmt t;
+    t.icon = icon;
+    if (g.dw && SUCCEEDED(g.dw->CreateTextFormat(dwFace, nullptr, (DWRITE_FONT_WEIGHT)weight, DWRITE_FONT_STYLE_NORMAL,
+                                                 DWRITE_FONT_STRETCH_NORMAL, (float)S(px), L"ko-kr", &t.fmt))) {
+        t.fmt->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+        g.dw->CreateEllipsisTrimmingSign(t.fmt, &t.ellipsis);
+        g.fmts[h] = t;
+    }
+    return h;
 }
 
 // Back buffer for a WM_PAINT: draw into dc, then Blit().
@@ -853,11 +957,7 @@ void DrawButton(const DRAWITEMSTRUCT* d) {
     }
     wchar_t text[128] = {};
     GetWindowTextW(d->hwndItem, text, 128);
-    SetBkMode(mem, TRANSPARENT);
-    SetTextColor(mem, fg);
-    HGDIOBJ oldFont = SelectObject(mem, font);
-    DrawTextW(mem, text, -1, &textRc, fmt);
-    SelectObject(mem, oldFont);
+    DrawTextIn(mem, text, textRc, font, fg, fmt & (DT_CENTER | DT_RIGHT));
 
     BitBlt(d->hDC, rc.left, rc.top, w, h, mem, 0, 0, SRCCOPY);
     SelectObject(mem, oldBmp);
@@ -1403,7 +1503,8 @@ void UpdateUi() {
     }
     RedrawWindow(g.hwnd, nullptr, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN);
 
-    lstrcpynW(g.nid.szTip, running ? L"ScanReceiver - 실행 중" : L"ScanReceiver - 중지됨", ARRAYSIZE(g.nid.szTip));
+    std::wstring trayTip = std::wstring(g.testInstance ? kTestTitle : kAppTitle) + (running ? L" - 실행 중" : L" - 중지됨");
+    lstrcpynW(g.nid.szTip, trayTip.c_str(), ARRAYSIZE(g.nid.szTip));
     g.nid.uFlags = NIF_TIP;
     Shell_NotifyIconW(NIM_MODIFY, &g.nid);
 }
@@ -1586,19 +1687,13 @@ void CreateSettingsControls(HWND p) {
     Controls& c = g.c;
     c.setClose = MakeButton(p, kGlyphClose, IDC_SETCLOSE, BtnKind::Icon, kBg);
     g.btns[c.setClose].danger = true;
-    c.lblRoot = Make(p, L"STATIC", L"저장 폴더", SS_LEFT | SS_CENTERIMAGE);
     c.root = MakeEdit(p, IDC_ROOT);
     c.browse = MakeButton(p, kGlyphFolder, IDC_BROWSE, BtnKind::Icon, kBg);
     g.btns[c.browse].bordered = true;
-    c.lblPort = Make(p, L"STATIC", L"포트", SS_LEFT | SS_CENTERIMAGE);
     c.port = MakeEdit(p, IDC_PORT, ES_NUMBER);
-    c.lblPasv = Make(p, L"STATIC", L"패시브", SS_CENTER | SS_CENTERIMAGE);
     c.pasvMin = MakeEdit(p, IDC_PASVMIN, ES_NUMBER);
-    c.lblTilde = Make(p, L"STATIC", L"–", SS_CENTER | SS_CENTERIMAGE);
     c.pasvMax = MakeEdit(p, IDC_PASVMAX, ES_NUMBER);
-    c.lblUser = Make(p, L"STATIC", L"사용자", SS_LEFT | SS_CENTERIMAGE);
     c.user = MakeEdit(p, IDC_USER);
-    c.lblPass = Make(p, L"STATIC", L"비밀번호", SS_LEFT | SS_CENTERIMAGE);
     c.pass = MakeEdit(p, IDC_PASS, ES_PASSWORD);
     SendMessageW(c.pass, EM_SETPASSWORDCHAR, kPasswordChar, 0);
     c.showPass = MakeButton(p, L"표시", IDC_SHOWPASS, BtnKind::Subtle, kBg);
@@ -1611,23 +1706,27 @@ void CreateSettingsControls(HWND p) {
     c.cancel = MakeButton(p, L"취소", IDC_CANCEL, BtnKind::Secondary, kFooterBg);
 
     const int L = 16, F = 100, R = kSetW - 16;
+    g.setLabels.clear();
+    auto label = [](const wchar_t* text, int x, int y, int w, COLORREF color, UINT align) {
+        g.setLabels.push_back({text, SR(x, y, w, kFieldH), color, align});
+    };
     Place(c.setClose, kSetW - 8 - 28, 4, 28, 28);
     int y = 44;
-    Place(c.lblRoot, L, y, 80, kFieldH);
+    label(L"저장 폴더", L, y, 80, kText, 0);
     PlaceField(c.root, F, y, R - F - 34);
     Place(c.browse, R - 30, y, 30, kFieldH);
     y += 38;
-    Place(c.lblPort, L, y, 80, kFieldH);
+    label(L"포트", L, y, 80, kText, 0);
     PlaceField(c.port, F, y, 56);
-    Place(c.lblPasv, F + 58, y, 46, kFieldH);
+    label(L"패시브", F + 58, y, 46, kTextSecondary, DT_CENTER);
     PlaceField(c.pasvMin, F + 104, y, 62);
-    Place(c.lblTilde, F + 166, y, 14, kFieldH);
+    label(L"–", F + 166, y, 14, kTextSecondary, DT_CENTER);
     PlaceField(c.pasvMax, F + 180, y, R - F - 180);
     y += 38;
-    Place(c.lblUser, L, y, 80, kFieldH);
+    label(L"사용자", L, y, 80, kText, 0);
     PlaceField(c.user, F, y, R - F);
     y += 38;
-    Place(c.lblPass, L, y, 80, kFieldH);
+    label(L"비밀번호", L, y, 80, kText, 0);
     PlaceField(c.pass, F, y, R - F - 48);
     Place(c.showPass, R - 44, y, 44, kFieldH);
     y += 42;
@@ -1712,6 +1811,7 @@ void PaintSettings(HWND hwnd, HDC target) {
     FillSolid(dc, {0, S(kSetFooterTop), rc.right, rc.bottom}, kFooterBg);
     FillSolid(dc, {0, S(kSetFooterTop), rc.right, S(kSetFooterTop) + 1}, kDivider);
     DrawTextIn(dc, L"설정", SR(12, 0, 200, kHeaderH), g.font, kText, 0);
+    for (const Label& l : g.setLabels) DrawTextIn(dc, l.text, l.rc, g.font, l.color, l.align);
     {
         Gdiplus::Graphics gr(dc);
         gr.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
@@ -1752,10 +1852,6 @@ LRESULT CALLBACK SettingsProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         SetTextColor((HDC)wp, kText);
         SetBkColor((HDC)wp, kField);
         return (LRESULT)g.fieldBrush;
-    case WM_CTLCOLORSTATIC:
-        SetBkMode((HDC)wp, TRANSPARENT);
-        SetTextColor((HDC)wp, (HWND)lp == g.c.lblPasv || (HWND)lp == g.c.lblTilde ? kTextSecondary : kText);
-        return (LRESULT)g.bgBrush;
     case WM_COMMAND: {
         int id = LOWORD(wp), code = HIWORD(wp);
         if (code == EN_SETFOCUS || code == EN_KILLFOCUS) {  // repaint the text-box underline
@@ -2192,30 +2288,21 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
     g.dpi = GetDeviceCaps(screen, LOGPIXELSY);
     ReleaseDC(nullptr, screen);
 
-    // QuickLinks sizes: 14 px text, 12 px captions (nothing smaller). The system message font is
-    // 9 pt (12 px) and read as blurry at 11 px. Segoe UI links Hangul to Malgun Gothic.
-    auto makeFont = [](int px, int weight, const wchar_t* face) {
-        LOGFONTW lf{};
-        lf.lfHeight = -S(px);
-        lf.lfWeight = weight;
-        lf.lfCharSet = DEFAULT_CHARSET;
-        lf.lfQuality = CLEARTYPE_QUALITY;
-        lstrcpyW(lf.lfFaceName, face);
-        return CreateFontIndirectW(&lf);
-    };
-    g.font = makeFont(14, FW_NORMAL, L"Segoe UI");
-    g.fontBold = makeFont(14, FW_SEMIBOLD, L"Segoe UI");
-    g.fontSmall = makeFont(12, FW_NORMAL, L"Segoe UI");
-    g.fontSmallBold = makeFont(12, FW_SEMIBOLD, L"Segoe UI");
-    g.fontMono = makeFont(13, FW_NORMAL, L"Consolas");
-    LOGFONTW icons{};
-    icons.lfHeight = -S(14);
-    icons.lfCharSet = DEFAULT_CHARSET;
-    icons.lfQuality = ANTIALIASED_QUALITY;  // ClearType colour fringes look wrong on glyph icons
-    lstrcpyW(icons.lfFaceName, HasFontFamily(L"Segoe Fluent Icons") ? L"Segoe Fluent Icons" : L"Segoe MDL2 Assets");
-    g.fontIcon = CreateFontIndirectW(&icons);
-    icons.lfHeight = -S(10);
-    g.fontIconSmall = CreateFontIndirectW(&icons);
+    // QuickLinks text: DirectWrite, Segoe UI Variable Text (Segoe UI on Windows 10), Hangul falls back
+    // to Malgun Gothic. 14 px text, 12 px captions, nothing smaller. GDI drew Malgun Gothic thin and
+    // jagged (2026-10-26: five font/renderer pairs compared, the user picked this one).
+    D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &g.d2d);
+    DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), (IUnknown**)&g.dw);
+    CreateTextTarget();
+    const wchar_t* ui = g.dw && DWriteHasFamily(L"Segoe UI Variable Text") ? L"Segoe UI Variable Text" : L"Segoe UI";
+    const wchar_t* icons = HasFontFamily(L"Segoe Fluent Icons") ? L"Segoe Fluent Icons" : L"Segoe MDL2 Assets";
+    g.font = MakeFont(14, FW_NORMAL, L"Segoe UI", ui);
+    g.fontBold = MakeFont(14, FW_SEMIBOLD, L"Segoe UI", ui);
+    g.fontSmall = MakeFont(12, FW_NORMAL, L"Segoe UI", ui);
+    g.fontSmallBold = MakeFont(12, FW_SEMIBOLD, L"Segoe UI", ui);
+    g.fontMono = MakeFont(13, FW_NORMAL, L"Consolas", L"Consolas");
+    g.fontIcon = MakeFont(14, FW_NORMAL, icons, icons, true);
+    g.fontIconSmall = MakeFont(10, FW_NORMAL, icons, icons, true);
     {
         HDC sdc = GetDC(nullptr);
         HGDIOBJ old = SelectObject(sdc, g.font);
@@ -2279,6 +2366,13 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
     for (HGDIOBJ o : {(HGDIOBJ)g.font, (HGDIOBJ)g.fontBold, (HGDIOBJ)g.fontSmall, (HGDIOBJ)g.fontSmallBold, (HGDIOBJ)g.fontIcon,
                       (HGDIOBJ)g.fontIconSmall, (HGDIOBJ)g.fontMono, (HGDIOBJ)g.bgBrush, (HGDIOBJ)g.fieldBrush})
         DeleteObject(o);
+    for (auto& f : g.fmts) {
+        if (f.second.ellipsis) f.second.ellipsis->Release();
+        f.second.fmt->Release();
+    }
+    ReleaseTextTarget();
+    if (g.dw) g.dw->Release();
+    if (g.d2d) g.d2d->Release();
     Gdiplus::GdiplusShutdown(gdiplusToken);
     CoUninitialize();
     WSACleanup();
