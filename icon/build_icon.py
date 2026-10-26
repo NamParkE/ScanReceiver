@@ -1,15 +1,15 @@
-"""Renders scanreceiver.svg (scanreceiver-small.svg up to 24 px) at every icon size with Edge (headless) and packs ../app.ico.
+"""Renders scanreceiver.svg (scanreceiver-small.svg up to 24 px) at every icon size and packs ../app.ico.
 
-Usage: python build_icon.py
-Each size is rasterized natively by the browser (not downscaled from 256 px), so small
+Usage: python build_icon.py   (needs Pillow and PyMuPDF: pip install pillow pymupdf)
+Each size is rasterized from the vector source (not downscaled from 256 px), so small
 sizes stay sharp. The .ico stores PNG entries, which Windows Vista and later read.
+Edge headless was used before, but stopped writing screenshots on this PC (2026-10-26).
 """
 import io
 import os
 import struct
-import subprocess
-import tempfile
 
+import pymupdf
 from PIL import Image
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -19,33 +19,13 @@ SMALL_MAX = 24
 ICO = os.path.join(HERE, "..", "app.ico")
 SIZES = [16, 20, 24, 32, 40, 48, 64, 96, 128, 256]
 GAP = 8
-EDGE_PATHS = [
-    os.path.expandvars(r"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe"),
-    os.path.expandvars(r"%ProgramFiles%\Microsoft\Edge\Application\msedge.exe"),
-]
 
 
-def render_strip(tmp, svg_path, sizes):
-    svg = open(svg_path, encoding="utf-8").read()
-    x, imgs = 0, []
-    for s in sizes:
-        imgs.append(f'<div style="position:absolute;left:{x}px;top:0;width:{s}px;height:{s}px">'
-                    f'{svg.replace("<svg ", f"<svg width=\"{s}\" height=\"{s}\" ", 1)}</div>')
-        x += s + GAP
-    # Every size inlines the same ids; that is fine because all copies are identical.
-    html = ('<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;background:transparent}'
-            '</style></head><body>' + "".join(imgs) + "</body></html>")
-    name = os.path.splitext(os.path.basename(svg_path))[0]
-    page = os.path.join(tmp, name + ".html")
-    png = os.path.join(tmp, name + ".png")
-    open(page, "w", encoding="utf-8").write(html)
-    edge = next(p for p in EDGE_PATHS if os.path.exists(p))
-    subprocess.run([edge, "--headless=new", "--disable-gpu", "--hide-scrollbars", "--force-device-scale-factor=1",
-                    # Headless window size includes non-viewport space; leave room so 256 px isn't clipped.
-                    "--default-background-color=00000000", f"--window-size={max(x, 200)},{max(sizes) + 200}",
-                    f"--screenshot={png}", "file:///" + page.replace("\\", "/")],
-                   check=True, capture_output=True)
-    return Image.open(png).convert("RGBA")
+def render(svg_path, size):
+    page = pymupdf.open(svg_path)[0]
+    zoom = size / page.rect.width
+    pix = page.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom), alpha=True)
+    return Image.open(io.BytesIO(pix.tobytes("png"))).convert("RGBA")
 
 
 def write_ico(frames, path):
@@ -66,14 +46,7 @@ def write_ico(frames, path):
 
 
 def main():
-    with tempfile.TemporaryDirectory() as tmp:
-        frames = []
-        for path, sizes in ((SMALL_SVG, [s for s in SIZES if s <= SMALL_MAX]),
-                            (SVG, [s for s in SIZES if s > SMALL_MAX])):
-            strip, x = render_strip(tmp, path, sizes), 0
-            for s in sizes:
-                frames.append(strip.crop((x, 0, x + s, s)))
-                x += s + GAP
+    frames = [render(SMALL_SVG if s <= SMALL_MAX else SVG, s) for s in SIZES]
     write_ico(frames, ICO)
     preview = Image.new("RGBA", (sum(SIZES) + GAP * len(SIZES), max(SIZES)), (0, 0, 0, 0))
     x = 0

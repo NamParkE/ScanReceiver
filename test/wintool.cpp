@@ -69,7 +69,9 @@ int wmain(int argc, wchar_t** argv) {
         wprintf(L"%d %d %d %d %d\n", r.left, r.top, r.right, r.bottom, w ? IsWindowVisible(w) : -1);
         return 0;
     }
-    HWND h = FindWindowW(L"ScanReceiverMainWindow", nullptr);
+    // A test instance (--ini) first, so the user's own copy is left alone when both run.
+    HWND h = FindWindowW(L"ScanReceiverMainWindow", L"ScanReceiver (test)");
+    if (!h) h = FindWindowW(L"ScanReceiverMainWindow", nullptr);
     if (!h) {
         fwprintf(stderr, L"no window\n");
         return 1;
@@ -80,7 +82,7 @@ int wmain(int argc, wchar_t** argv) {
     } else if (!wcscmp(cmd, L"untop")) {
         SetWindowPos(h, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
     } else if (!wcscmp(cmd, L"start")) {
-        PostMessageW(h, WM_COMMAND, 112, 0);  // IDC_STARTSTOP
+        PostMessageW(h, WM_COMMAND, 100, 0);  // IDC_STARTSTOP
     } else if (!wcscmp(cmd, L"cmd") && argc > 2) {
         PostMessageW(h, WM_COMMAND, _wtoi(argv[2]), 0);
     } else if (!wcscmp(cmd, L"close")) {

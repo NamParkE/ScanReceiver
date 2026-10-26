@@ -1,14 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
-  <!-- Simplified frame for 16-24 px: no shadow or tilt, darker outlines, larger badge. -->
-  <defs>
-    <linearGradient id="lid" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#E4E7EA"/><stop offset="1" stop-color="#A4AAB0"/></linearGradient>
-    <linearGradient id="front" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#D3D7DB"/><stop offset="1" stop-color="#8E9398"/></linearGradient>
-  </defs>
-  <rect x="4.5" y="0.5" width="7" height="4.5" rx=".6" fill="#FFFFFF" stroke="#80868C" stroke-width=".7"/>
-  <path d="M1.8 8 L3.4 4.2 H12.6 L14.2 8 Z" fill="url(#lid)" stroke="#5F656B" stroke-width=".7" stroke-linejoin="round"/>
-  <rect x="0.8" y="7.2" width="14.4" height="1.8" rx=".9" fill="#2B2F33"/>
-  <rect x="1.8" y="7.75" width="12.4" height=".7" rx=".35" fill="#FFFFFF"/>
-  <path d="M0.9 9 H15.1 V12.6 Q15.1 14 13.7 14 H2.3 Q0.9 14 0.9 12.6 Z" fill="url(#front)" stroke="#5F656B" stroke-width=".7"/>
-  <circle cx="12" cy="12" r="3.6" fill="#1A1C1E" stroke="#FFFFFF" stroke-width=".8"/>
-  <path d="M12 9.9 V13.6 M10.4 12.1 L12 13.7 L13.6 12.1" stroke="#FFFFFF" stroke-width="1.1" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- 16-24 px frame: fuller square, thicker arrow and a shallower tray so both stay readable. -->
+  <rect x="0.5" y="0.5" width="15" height="15" rx="3.5" fill="#005FB8"/>
+  <path d="M8 3 V8.2 M5.6 6 L8 8.4 L10.4 6" fill="none" stroke="#FFFFFF" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M3 9.5 H5.8 L6.8 11 H9.2 L10.2 9.5 H13 V12.3 Q13 13 12.3 13 H3.7 Q3 13 3 12.3 Z" fill="#FFFFFF"/>
 </svg>
