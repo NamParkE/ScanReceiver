@@ -2,7 +2,7 @@
 
 복합기·스캐너의 **Scan to FTP**로 보낸 파일을 받는 Windows용 C++ Win32 GUI 앱. 사용 설명은 [README.md](README.md), 이 문서는 이어서 개발하는 사람(새 Claude 세션 포함)을 위한 것.
 
-- 저장소: https://github.com/NamParkE/ScanReceiver (**공개**, `main`). 릴리즈: v1.0.0 (2026-10-26, 위젯 UI 이전 버전)
+- 저장소: https://github.com/NamParkE/ScanReceiver (**공개**, `main`). 릴리즈: v1.0.0 (위젯 UI 이전), v1.1.0 (2026-10-26, 위젯 UI·DirectWrite 글자·R3 아이콘). 매니페스트 version은 아직 1.0.0.0(올리려면 재빌드 필요)
 - 로컬: `C:\Users\Administrator\WorkApps\ScanReceiver` (원래 `ScreenShot` 폴더 안에서 시작했다가 분리함 — ScreenShot(C# WPF 캡처 앱)과는 무관. 2026-10-26 `WorkApps` 아래로 옮김)
 - 형제 프로젝트: `..\QuickLinks`(바로가기 위젯, 같은 C++ Win32), `..\ScreenShot`(C# WPF). **UI·아이콘은 QuickLinks와 같은 디자인 언어**(Fluent 단색, 36px 머리글, `#005FB8` 강조, 파란 둥근 사각형 + 흰 기호 아이콘)로 맞춤.
 
