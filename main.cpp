@@ -79,6 +79,7 @@ enum : int {
     IDC_LOG = 140,
     IDC_VERBOSE,
     IDC_CLEARLOG,
+    IDC_TEST_SHOWTIP = 190,  // wintool cmd 190: show the hover card without a real mouse (test instances only)
     IDM_OPEN = 200,
     IDM_SHOW_IN_FOLDER,
     IDM_CLEAR_LIST,
@@ -90,19 +91,19 @@ enum : int {
 
 enum : UINT { WM_APP_LOG = WM_APP + 1, WM_APP_FILE, WM_APP_TRAY, WM_APP_THUMB };
 
-enum : UINT_PTR { kCopyResetTimer = 1, kAnimTimer = 100, kToastHoldTimer = 101 };
+enum : UINT_PTR { kCopyResetTimer = 1, kTipTimer = 2, kAnimTimer = 100, kToastHoldTimer = 101 };
 
 constexpr wchar_t kWindowClass[] = L"ScanReceiverMainWindow";
 constexpr wchar_t kLogClass[] = L"ScanReceiverLogWindow";
 constexpr wchar_t kSettingsClass[] = L"ScanReceiverSettings";
 constexpr wchar_t kFileListClass[] = L"ScanReceiverFileList";
 constexpr wchar_t kToastClass[] = L"ScanReceiverToast";
+constexpr wchar_t kTipClass[] = L"ScanReceiverTip";
 constexpr wchar_t kAppTitle[] = L"ScanReceiver";
 constexpr wchar_t kTestTitle[] = L"ScanReceiver (test)";
 constexpr wchar_t kRunKey[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 constexpr wchar_t kPasswordChar = L'\x25CF';
 constexpr size_t kMaxLogLines = 2000;
-constexpr UINT_PTR kStatusTipId = 1;
 
 constexpr int kToastFileHoldMs = 5000;  // long enough to reach 열기 / 폴더에서 보기
 constexpr int kToastMessageHoldMs = 3000;
@@ -127,7 +128,7 @@ constexpr int kFooterTop = kListTop + kListH + 4, kFooterH = 34;
 constexpr int kH = kFooterTop + kFooterH;
 
 // Settings window layout (DIPs).
-constexpr int kSetW = 340, kSetFooterTop = 314, kSetH = kSetFooterTop + 50;
+constexpr int kSetW = 360, kSetFooterTop = 314, kSetH = kSetFooterTop + 50;
 constexpr int kFieldH = 30;
 
 // Fluent (Windows 11) light palette, the same values as QuickLinks.
@@ -275,12 +276,14 @@ struct App {
     HWND hwnd = nullptr;
     HWND logWnd = nullptr;
     HWND settingsWnd = nullptr;
-    HWND tip = nullptr;
+    HWND tipWnd = nullptr;  // scanner-settings card shown on hover
+    bool tipTracking = false;
     Anim logAnim;
     Toast toast;
     HFONT font = nullptr;
     HFONT fontBold = nullptr;
     HFONT fontSmall = nullptr;
+    HFONT fontSmallBold = nullptr;
     HFONT fontIcon = nullptr;
     HFONT fontIconSmall = nullptr;
     HFONT fontMono = nullptr;
@@ -299,7 +302,8 @@ struct App {
     int listTop = 0, listHover = -1, listSel = -1;
     std::deque<std::wstring> logLines;  // full log; the list box may show a filtered view
     std::wstring primaryIp;
-    std::wstring statusTip;
+    std::vector<std::pair<std::wstring, std::wstring>> tipRows;
+    std::vector<std::wstring> tipOthers;
     bool trayHintShown = false;
     bool testInstance = false;  // started with --ini: no single-instance lock, no registry writes
     NOTIFYICONDATAW nid{};
@@ -1004,7 +1008,7 @@ void PaintList(HWND hwnd, HDC target) {
 
     if (g.files.empty()) {
         const wchar_t* text = g.server.IsRunning() ? L"아직 받은 파일이 없습니다" : L"서버를 켜면 받은 파일이 여기에 표시됩니다";
-        DrawTextIn(dc, text, rc, g.fontSmall, kTextTertiary, DT_CENTER | DT_END_ELLIPSIS);
+        DrawTextIn(dc, text, rc, g.fontSmall, kTextSecondary, DT_CENTER | DT_END_ELLIPSIS);
         return;
     }
 
@@ -1278,13 +1282,102 @@ ToastPart ToastHit(POINT p) {
 
 // ---- UI state -------------------------------------------------------------------------------
 
-void SetStatusTip(const std::wstring& text) {
-    g.statusTip = text;
-    TOOLINFOW ti{sizeof ti};
-    ti.hwnd = g.hwnd;
-    ti.uId = kStatusTipId;
-    ti.lpszText = g.statusTip.empty() ? const_cast<wchar_t*>(L"") : &g.statusTip[0];
-    SendMessageW(g.tip, TTM_UPDATETIPTEXTW, 0, (LPARAM)&ti);
+// ---- scanner-settings card (hover the status card) ------------------------------------------
+// A drawn card beside the widget instead of a system tooltip, so it never covers the file list.
+
+RECT StatusCardRect() { return SR(10, kCardTop, kW - 20, kCardH); }
+
+constexpr int kTipW = 232, kTipPad = 14, kTipTitleH = 26, kTipRowH = 22, kTipOtherH = 18;
+
+int TipHeight() {
+    int h = kTipPad + kTipTitleH + kTipRowH * (int)g.tipRows.size() + kTipPad - 4;
+    if (!g.tipOthers.empty()) h += 9 + kTipRowH + kTipOtherH * ((int)g.tipOthers.size() - 1);
+    return h;
+}
+
+void HideTip() {
+    KillTimer(g.hwnd, kTipTimer);
+    ShowWindow(g.tipWnd, SW_HIDE);
+}
+
+void ShowTip() {
+    if (!g.server.IsRunning() || g.tipRows.empty()) return;
+    RECT m, wa = WorkAreaOf(g.hwnd);
+    GetWindowRect(g.hwnd, &m);
+    int w = S(kTipW), h = S(TipHeight()), gap = S(6);
+    int x = m.right + gap + w <= wa.right ? m.right + gap : m.left - gap - w;
+    int y = (std::min)((int)(m.top + S(kCardTop)), (int)wa.bottom - h);
+    SetWindowPos(g.tipWnd, HWND_TOPMOST, x, y, w, h, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    InvalidateRect(g.tipWnd, nullptr, FALSE);
+}
+
+void PaintTip(HWND hwnd, HDC target) {
+    Buffer buf(hwnd, target);
+    HDC dc = buf.dc;
+    RECT rc = buf.rc;
+    FillSolid(dc, rc, kCard);
+    HBRUSH frame = CreateSolidBrush(kCardBorder);
+    FrameRect(dc, &rc, frame);
+    DeleteObject(frame);
+
+    const int L = kTipPad, V = kTipPad + 62, R = kTipW - kTipPad;
+    int y = kTipPad;
+    DrawTextIn(dc, L"스캐너에 입력할 값", SR(L, y, R - L, 18), g.fontSmallBold, kText, 0);
+    y += kTipTitleH;
+    for (const auto& row : g.tipRows) {
+        DrawTextIn(dc, row.first, SR(L, y, V - L, kTipRowH), g.fontSmall, kTextSecondary, 0);
+        DrawTextIn(dc, row.second, SR(V, y, R - V, kTipRowH), g.fontMono, kText, DT_END_ELLIPSIS);
+        y += kTipRowH;
+    }
+    if (g.tipOthers.empty()) return;
+    y += 4;
+    FillSolid(dc, {S(L), S(y), S(R), S(y) + 1}, kDivider);
+    y += 5;
+    DrawTextIn(dc, L"다른 IP", SR(L, y, V - L, kTipRowH), g.fontSmall, kTextSecondary, 0);
+    for (size_t i = 0; i < g.tipOthers.size(); ++i) {
+        int top = y + (i ? kTipRowH + kTipOtherH * ((int)i - 1) : 0);
+        DrawTextIn(dc, g.tipOthers[i], SR(V, top, R - V, i ? kTipOtherH : kTipRowH), g.fontMono, kTextSecondary, 0);
+    }
+}
+
+LRESULT CALLBACK TipProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    switch (msg) {
+    case WM_CREATE: {
+        const DWORD kCornerPreference = 33;  // DWMWA_WINDOW_CORNER_PREFERENCE
+        const int kRoundSmall = 3;           // DWMWCP_ROUNDSMALL: 4 px, like Windows tooltips
+        DwmSetWindowAttribute(hwnd, kCornerPreference, &kRoundSmall, sizeof kRoundSmall);
+        return 0;
+    }
+    case WM_PAINT: {
+        PAINTSTRUCT ps;
+        HDC dc = BeginPaint(hwnd, &ps);
+        PaintTip(hwnd, dc);
+        EndPaint(hwnd, &ps);
+        return 0;
+    }
+    case WM_ERASEBKGND:
+        return 1;
+    case WM_MOUSEACTIVATE:
+        return MA_NOACTIVATE;
+    case WM_NCHITTEST:
+        return HTTRANSPARENT;
+    }
+    return DefWindowProcW(hwnd, msg, wp, lp);
+}
+
+// Called on mouse moves over the widget: show the card after a short rest on the status card.
+void TrackTipHover(POINT client) {
+    RECT card = StatusCardRect();
+    if (!PtInRect(&card, client)) {
+        HideTip();
+        return;
+    }
+    if (!g.tipTracking) {
+        g.tipTracking = true;
+        TRACKMOUSEEVENT tme{sizeof tme, TME_LEAVE, g.hwnd, 0};
+        TrackMouseEvent(&tme);
+    }
+    if (!IsWindowVisible(g.tipWnd)) SetTimer(g.hwnd, kTipTimer, 450, nullptr);
 }
 
 void UpdateUi() {
@@ -1292,20 +1385,21 @@ void UpdateUi() {
     SetChecked(g.c.startStop, running);
     ShowWindow(g.c.copyAddr, running ? SW_SHOW : SW_HIDE);
 
+    g.tipRows.clear();
+    g.tipOthers.clear();
     if (running) {
         const FtpConfig& cfg = g.server.Config();
         std::vector<std::wstring> ips = LocalIPv4Addresses();
         g.primaryIp = PrimaryIPv4();
         if (g.primaryIp.empty() && !ips.empty()) g.primaryIp = ips[0];
-        std::wstring others;
         for (const auto& ip : ips)
-            if (ip != g.primaryIp) others += (others.empty() ? L"" : L", ") + ip;
-        SetStatusTip(L"스캐너에 입력할 값\n서버: " + (g.primaryIp.empty() ? L"-" : g.primaryIp) +
-                     L"\n포트: " + std::to_wstring(cfg.port) + L"\n사용자: " +
-                     (cfg.user.empty() ? L"(아무거나)" : cfg.user) + L"\n경로: /" +
-                     (others.empty() ? L"" : L"\n\n다른 IP: " + others));
+            if (ip != g.primaryIp) g.tipOthers.push_back(ip);
+        g.tipRows = {{L"서버", g.primaryIp.empty() ? L"-" : g.primaryIp},
+                     {L"포트", std::to_wstring(cfg.port)},
+                     {L"사용자", cfg.user.empty() ? L"(아무거나)" : cfg.user},
+                     {L"경로", L"/"}};
     } else {
-        SetStatusTip(L"");
+        HideTip();
     }
     RedrawWindow(g.hwnd, nullptr, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN);
 
@@ -1402,7 +1496,10 @@ void RestoreWindow() {
     SetForegroundWindow(g.hwnd);
 }
 
+void HideTip();
+
 void HideToTray() {
+    HideTip();
     HidePopup(g.logWnd, g.logAnim);
     ShowWindow(g.settingsWnd, SW_HIDE);
     ShowWindow(g.hwnd, SW_HIDE);
@@ -1443,19 +1540,6 @@ void CreateMainControls() {
     Place(c.list, 0, kListTop, kW, kListH);
     Place(c.openDir, 0, kFooterTop, kW / 2, kFooterH);
     Place(c.showLog, kW / 2, kFooterTop, kW / 2, kFooterH);
-
-    // Full scanner settings live in a tooltip on the status card.
-    g.tip = CreateWindowExW(WS_EX_TOPMOST, TOOLTIPS_CLASSW, nullptr, WS_POPUP | TTS_ALWAYSTIP | TTS_NOPREFIX, 0, 0, 0,
-                            0, g.hwnd, nullptr, g.inst, nullptr);
-    TOOLINFOW ti{sizeof ti};
-    ti.uFlags = TTF_SUBCLASS;
-    ti.hwnd = g.hwnd;
-    ti.uId = kStatusTipId;
-    ti.rect = SR(10, kCardTop, kW - 20, kCardH);
-    ti.lpszText = const_cast<wchar_t*>(L"");
-    SendMessageW(g.tip, TTM_ADDTOOLW, 0, (LPARAM)&ti);
-    SendMessageW(g.tip, TTM_SETMAXTIPWIDTH, 0, S(400));
-    SendMessageW(g.tip, TTM_SETDELAYTIME, TTDT_AUTOPOP, 20000);
 }
 
 void PaintMain(HWND hwnd, HDC target) {
@@ -1480,14 +1564,14 @@ void PaintMain(HWND hwnd, HDC target) {
                                        L":" + std::to_wstring(g.server.Config().port)
                                  : std::wstring(L"스위치를 켜면 수신을 시작합니다");
     DrawTextIn(dc, line2, SR(cl, kCardTop + 32, cr - cl - (running ? 30 : 0), 20), running ? g.fontMono : g.fontSmall,
-               running ? kTextSecondary : kTextTertiary, DT_END_ELLIPSIS);
+               kTextSecondary, DT_END_ELLIPSIS);
     std::wstring who = g.cfg.user.empty() ? std::wstring(L"사용자 없음") : L"사용자 " + g.cfg.user;
     DrawTextIn(dc, who + L"  ·  " + ShortPath(g.cfg.root), SR(cl, kCardTop + 52, cr - cl, 18), g.fontSmall,
-               kTextTertiary, DT_END_ELLIPSIS);
+               kTextSecondary, DT_END_ELLIPSIS);
 
     std::wstring group = L"받은 파일";
-    int gw = TextWidth(dc, group, g.fontBold);
-    DrawTextIn(dc, group, SR(12, kGroupTop, 120, kGroupH), g.fontBold, kTextSecondary, 0);
+    int gw = TextWidth(dc, group, g.fontSmallBold);
+    DrawTextIn(dc, group, SR(12, kGroupTop, 120, kGroupH), g.fontSmallBold, kTextSecondary, 0);
     if (!g.files.empty())
         DrawTextIn(dc, L"·  " + std::to_wstring(g.files.size()), {S(12) + gw + S(6), S(kGroupTop), S(kW), S(kGroupTop + kGroupH)},
                    g.fontSmall, kTextTertiary, 0);
@@ -1536,9 +1620,9 @@ void CreateSettingsControls(HWND p) {
     Place(c.lblPort, L, y, 80, kFieldH);
     PlaceField(c.port, F, y, 56);
     Place(c.lblPasv, F + 58, y, 46, kFieldH);
-    PlaceField(c.pasvMin, F + 104, y, 54);
-    Place(c.lblTilde, F + 158, y, 12, kFieldH);
-    PlaceField(c.pasvMax, F + 170, y, R - F - 170);
+    PlaceField(c.pasvMin, F + 104, y, 62);
+    Place(c.lblTilde, F + 166, y, 14, kFieldH);
+    PlaceField(c.pasvMax, F + 180, y, R - F - 180);
     y += 38;
     Place(c.lblUser, L, y, 80, kFieldH);
     PlaceField(c.user, F, y, R - F);
@@ -1574,6 +1658,7 @@ void FillSettingsControls() {
 }
 
 void OpenSettings() {
+    HideTip();
     if (!IsWindowVisible(g.hwnd)) RestoreWindow();
     if (!IsWindowVisible(g.settingsWnd)) {
         FillSettingsControls();
@@ -1910,6 +1995,9 @@ void OnCommand(int id, int code) {
     case IDM_TRAY_SHOW:
         RestoreWindow();
         break;
+    case IDC_TEST_SHOWTIP:
+        if (g.testInstance) ShowTip();
+        break;
     case IDM_TRAY_EXIT:
         DestroyWindow(g.hwnd);
         break;
@@ -1950,6 +2038,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         g.toast.hwnd = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_LAYERED,
                                        kToastClass, L"", WS_POPUP, 0, 0, S(340), S(96), nullptr, nullptr, g.inst,
                                        nullptr);
+        g.tipWnd = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE, kTipClass, L"", WS_POPUP, 0, 0,
+                                   S(kTipW), S(100), hwnd, nullptr, g.inst, nullptr);
         SetChecked(g.c.verbose, g.cfg.verbose);
         AddTrayIcon();
         g.server.SetLogHandler([](const std::wstring& m) {
@@ -1984,8 +2074,18 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             if (g.cfg.toTray) HideToTray();
         }
         return 0;
+    case WM_ENTERSIZEMOVE:
+        HideTip();
+        return 0;
     case WM_EXITSIZEMOVE:
         SaveWindowPos();
+        return 0;
+    case WM_MOUSEMOVE:
+        TrackTipHover({GET_X_LPARAM(lp), GET_Y_LPARAM(lp)});
+        return 0;
+    case WM_MOUSELEAVE:  // also fires when the pointer moves onto a child (switch, copy button)
+        g.tipTracking = false;
+        HideTip();
         return 0;
     case WM_PAINT: {
         PAINTSTRUCT ps;
@@ -1997,6 +2097,15 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_ERASEBKGND:
         return 1;  // WM_PAINT fills everything from a back buffer
     case WM_TIMER:
+        if (wp == kTipTimer) {
+            KillTimer(hwnd, kTipTimer);
+            POINT pt;
+            GetCursorPos(&pt);
+            HWND under = WindowFromPoint(pt);
+            ScreenToClient(hwnd, &pt);
+            RECT card = StatusCardRect();
+            if (under == hwnd && PtInRect(&card, pt)) ShowTip();
+        }
         if (wp == kCopyResetTimer) {
             KillTimer(hwnd, kCopyResetTimer);
             SetWindowTextW(g.c.copyAddr, kGlyphCopy);
@@ -2083,16 +2192,22 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
     g.dpi = GetDeviceCaps(screen, LOGPIXELSY);
     ReleaseDC(nullptr, screen);
 
-    NONCLIENTMETRICSW ncm{};
-    ncm.cbSize = sizeof ncm;
-    SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof ncm, &ncm, 0);
-    g.font = CreateFontIndirectW(&ncm.lfMessageFont);
-    LOGFONTW bold = ncm.lfMessageFont;
-    bold.lfWeight = FW_SEMIBOLD;
-    g.fontBold = CreateFontIndirectW(&bold);
-    LOGFONTW smaller = ncm.lfMessageFont;  // not "small": rpcndr.h #defines it
-    smaller.lfHeight = smaller.lfHeight * 9 / 10;
-    g.fontSmall = CreateFontIndirectW(&smaller);
+    // QuickLinks sizes: 14 px text, 12 px captions (nothing smaller). The system message font is
+    // 9 pt (12 px) and read as blurry at 11 px. Segoe UI links Hangul to Malgun Gothic.
+    auto makeFont = [](int px, int weight, const wchar_t* face) {
+        LOGFONTW lf{};
+        lf.lfHeight = -S(px);
+        lf.lfWeight = weight;
+        lf.lfCharSet = DEFAULT_CHARSET;
+        lf.lfQuality = CLEARTYPE_QUALITY;
+        lstrcpyW(lf.lfFaceName, face);
+        return CreateFontIndirectW(&lf);
+    };
+    g.font = makeFont(14, FW_NORMAL, L"Segoe UI");
+    g.fontBold = makeFont(14, FW_SEMIBOLD, L"Segoe UI");
+    g.fontSmall = makeFont(12, FW_NORMAL, L"Segoe UI");
+    g.fontSmallBold = makeFont(12, FW_SEMIBOLD, L"Segoe UI");
+    g.fontMono = makeFont(13, FW_NORMAL, L"Consolas");
     LOGFONTW icons{};
     icons.lfHeight = -S(14);
     icons.lfCharSet = DEFAULT_CHARSET;
@@ -2101,10 +2216,6 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
     g.fontIcon = CreateFontIndirectW(&icons);
     icons.lfHeight = -S(10);
     g.fontIconSmall = CreateFontIndirectW(&icons);
-    LOGFONTW mono = ncm.lfMessageFont;
-    mono.lfHeight = smaller.lfHeight;
-    lstrcpyW(mono.lfFaceName, L"Consolas");
-    g.fontMono = CreateFontIndirectW(&mono);
     {
         HDC sdc = GetDC(nullptr);
         HGDIOBJ old = SelectObject(sdc, g.font);
@@ -2140,6 +2251,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
     RegisterWindowClass(kSettingsClass, SettingsProc, g.bgBrush);
     RegisterWindowClass(kFileListClass, ListProc, g.bgBrush, CS_DBLCLKS);
     RegisterWindowClass(kToastClass, ToastProc, g.bgBrush, CS_DROPSHADOW);
+    RegisterWindowClass(kTipClass, TipProc, g.bgBrush, CS_DROPSHADOW);
 
     // Borderless widget (QuickLinks style): WS_THICKFRAME only so DWM draws the border and shadow.
     const DWORD style = WS_POPUP | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_CLIPCHILDREN;
@@ -2164,7 +2276,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
 
     ToastSetThumb(nullptr);
     ToastSetTypeIcon(nullptr);
-    for (HGDIOBJ o : {(HGDIOBJ)g.font, (HGDIOBJ)g.fontBold, (HGDIOBJ)g.fontSmall, (HGDIOBJ)g.fontIcon,
+    for (HGDIOBJ o : {(HGDIOBJ)g.font, (HGDIOBJ)g.fontBold, (HGDIOBJ)g.fontSmall, (HGDIOBJ)g.fontSmallBold, (HGDIOBJ)g.fontIcon,
                       (HGDIOBJ)g.fontIconSmall, (HGDIOBJ)g.fontMono, (HGDIOBJ)g.bgBrush, (HGDIOBJ)g.fieldBrush})
         DeleteObject(o);
     Gdiplus::GdiplusShutdown(gdiplusToken);

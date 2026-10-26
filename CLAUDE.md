@@ -42,7 +42,7 @@ test\build_wintool.bat                      :: 화면 확인용 도구 → test\
 - `wintool`은 테스트 인스턴스 창을 먼저 찾고 없으면 사용자 창을 찾음. `wintool rect <창 클래스>` + `wintool area`로 설정 창(`ScanReceiverSettings`)·토스트(`ScanReceiverToast`)도 캡처.
 - 사용자가 앱을 실행 중이면 `build\ScanReceiver.exe`가 잠겨 링크가 실패함. 끄지 말고, 다른 출력 폴더로 컴파일해 검증한 뒤(확인 후 삭제) 사용자에게 알릴 것.
 - 화면 검증은 `wintool capture/area/burst`(화면 BitBlt). **PrintWindow는 강제로 다시 그려서** "마우스를 올려야 컨트롤이 그려지는" 버그를 가림(실제로 한 번 놓침).
-- `wintool cmd <id>`의 숫자는 `main.cpp` 맨 위 enum. 현재: 100 서버 켜기/끄기, 101 주소 복사, 102 설정 창, 103 닫기(트레이로), 104 폴더 열기, 105 로그, 202 목록 지우기, 203 트레이 열기, 204 트레이 설정, 205 트레이 로그, 206 종료. enum을 고치면 번호가 밀림.
+- `wintool cmd <id>`의 숫자는 `main.cpp` 맨 위 enum. 현재: 100 서버 켜기/끄기, 101 주소 복사, 190 스캐너 설정 카드 표시(테스트 인스턴스만), 102 설정 창, 103 닫기(트레이로), 104 폴더 열기, 105 로그, 202 목록 지우기, 203 트레이 열기, 204 트레이 설정, 205 트레이 로그, 206 종료. enum을 고치면 번호가 밀림.
 - 애니메이션은 `wintool burst`로 20~35ms 간격 연속 캡처 → 프레임별 변화량으로 이징 곡선과 유지 시간 확인.
 - 마우스로만 확인할 수 있는 것(호버, 머리글 끌기, 휠 스크롤, 토스트 링크 클릭)은 사용자에게 부탁.
 
@@ -61,6 +61,7 @@ test\build_wintool.bat                      :: 화면 확인용 도구 → test\
 - 위젯 레이아웃 상수는 `kW`, `kHeaderH`, `kCardTop`… (260×300). 상태 카드는 `PaintMain`이 그리고, 스위치·복사·톱니·✕·아래 링크 버튼만 자식 창.
 - 받은 파일 목록은 직접 그린 자식 창(`ListProc`, 클래스 `ScanReceiverFileList`): 30px 줄 4개, 휠 스크롤(위젯 어디서 굴려도 목록으로 전달), 더블클릭 열기, 우클릭 메뉴(열기/폴더에서 보기/목록 지우기). 데이터는 `g.files`(최신이 앞).
 - 아이콘 글리프는 `Segoe Fluent Icons`(없으면 `Segoe MDL2 Assets`, 코드 포인트 같음)를 GDI 폰트로, ClearType 색 번짐 때문에 `ANTIALIASED_QUALITY`.
+- 상태 카드에 마우스를 0.45초 올리면 스캐너 설정 카드(`TipProc`, 클래스 `ScanReceiverTip`)가 위젯 옆에 뜸. 시스템 툴팁은 위젯 내용을 가려서 바꿈(2026-10-26 사용자 요청). 글자는 Segoe UI 14px/12px ClearType(시스템 9pt 글꼴은 흐릿하다는 의견).
 - 직접 그리는 컨트롤: `BtnInfo`(Primary/Secondary/Subtle/Switch/Icon/Link/Check) + `ButtonSubclass`(호버 추적, 스위치·체크는 BN_CLICKED 전에 토글) + `DrawButton`(GDI+ 안티앨리어싱, 글자는 GDI ClearType). 서버 스위치는 클릭 후 `UpdateUi`가 실제 서버 상태로 다시 맞춤(시작 실패 시 꺼짐으로 돌아옴).
 - 설정 창 입력칸: 테두리 없는 EDIT를 `PlaceField`가 30px 상자 안에 배치하고 `PaintSettings`가 Fluent 텍스트 박스(포커스 시 2px 강조 밑줄)를 그림. Enter = 저장, Esc = 취소(`IsDialogMessage`의 IDOK/IDCANCEL). 저장 시 서버가 쓰는 값이 바뀌었고 실행 중이면 서버를 다시 시작.
 - 토스트(T4): 썸네일은 작업 스레드에서 `IShellItemImageFactory::GetImage(SIIGBF_THUMBNAILONLY)` → `WM_APP_THUMB`(그 사이엔 파일 형식 아이콘). 알파 없는 썸네일은 `StretchBlt`, 알파 있으면 `AlphaBlend`(msimg32). 파일 토스트 5초, 안내 토스트 3초, 마우스를 올리면 유지. 링크(열기/폴더에서 보기) 위에서 손 모양 커서.
