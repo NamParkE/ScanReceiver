@@ -23,3 +23,6 @@ CMakeCache.txt
 out/
 .vs/
 .vscode/
+
+# Test tool output (test/build_wintool.bat)
+test/out/

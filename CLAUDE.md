@@ -10,7 +10,7 @@
 - 답변·진행 안내는 **한국어**로.
 - 불필요·생성 파일은 지우거나 추적 해제할 때 **같은 커밋에서 `.gitignore`도 갱신**.
 - 디자인 변경은 먼저 **시안을 여러 개** 보여주고 고르게 함(아이콘도 3개 시안 → A안 → 모노톤 3종 → A2 실버로 확정).
-- 사용자가 실행 중인 ScanReceiver는 **끄지 말 것**. `build\ScanReceiver.ini`에는 사용자의 실제 설정(저장 폴더 `Desktop\scan` 등)이 있으니 덮어쓰지 말 것 → 테스트는 `..\ScanReceiverTest\tests\run_ftp_test.ps1`(백업·복원함).
+- 사용자가 실행 중인 ScanReceiver는 **끄지 말 것**. `build\ScanReceiver.ini`에는 사용자의 실제 설정(저장 폴더 `Desktop\scan` 등)이 있으니 덮어쓰지 말 것 → 테스트는 `test\run_ftp_test.ps1`(백업·복원함).
 - 화면 캡처는 **앱 창 영역만**. 창 사이 빈 곳에 사용자의 메일 등 개인 화면이 찍힌 적이 있음.
 
 ## 파일 구조
@@ -22,19 +22,17 @@
 | `app.rc`, `ScanReceiver.manifest`, `app.ico` | 아이콘, comctl32 v6, DPI 인식 |
 | `build.bat` / `build_mingw.bat` / `CMakeLists.txt` | MSVC 빌드(검증됨) / MinGW·CMake(**미검증**) |
 | `icon/` | 아이콘 SVG 원본 2개 + `build_icon.py`(Edge 헤드리스로 크기별 렌더 → `app.ico`) |
-| `build/` | 빌드 출력 + 사용자 설정 ini. git 무시 |
-
-테스트 도구는 앱 저장소와 분리해 옆 폴더 `C:\Users\Administrator\WorkApps\ScanReceiverTest`(git 아님)에서 관리: `tests/ftp_test.py`(12개 FTP 검사), `tests/run_ftp_test.ps1`(안전하게 실행), `tools/wintool.cpp`(창 조작·화면 캡처 도구), `tools/build_wintool.bat`. 앱 폴더에는 테스트·빌드 잔여물을 남기지 말 것.
+| `build/` | 앱 빌드 출력 + 사용자 설정 ini. git 무시. 테스트 산출물은 여기 두지 말 것 |
+| `test/` | 테스트 도구 전부: `ftp_test.py`(12개 FTP 검사), `run_ftp_test.ps1`(안전하게 실행), `wintool.cpp`(창 조작·화면 캡처 도구), `build_wintool.bat` |
+| `test/out/` | `wintool.exe` 빌드 출력. git 무시 |
 
 ## 빌드·테스트
 
 ```bat
 build.bat                                   :: MSVC (VS 2022 Build Tools, winget으로 설치됨)
 python icon\build_icon.py                   :: SVG 수정 후 app.ico 재생성
-
-:: ..\ScanReceiverTest 에서
-pwsh -File tests\run_ftp_test.ps1           :: 12/12 passed 여야 함 (앱 위치 기본값 ..\ScanReceiver)
-tools\build_wintool.bat                     :: 화면 확인용 도구 → ScanReceiverTest\build\wintool.exe
+pwsh -File test\run_ftp_test.ps1            :: 12/12 passed 여야 함 (앱 실행 중이면 거부)
+test\build_wintool.bat                      :: 화면 확인용 도구 → test\out\wintool.exe
 ```
 
 - 사용자가 앱을 실행 중이면 `build\ScanReceiver.exe`가 잠겨 링크가 실패함. 끄지 말고, 다른 출력 폴더로 컴파일해 검증(`cl ... /Fo<임시>\ /Fe<임시>\ScanReceiver.exe`)한 뒤 사용자에게 알릴 것.
@@ -96,4 +94,4 @@ tools\build_wintool.bat                     :: 화면 확인용 도구 → ScanR
 | 2026-10-20 | FTP 서버 + Win32 GUI 작성, MSVC 설치·빌드, FTP 테스트 12개 통과. GUI 1차 개선(상태 띠, 아이콘 목록, 로그 필터) |
 | 2026-10-21 | 첫 화면 미표시 버그(자식 미갱신)·크기 변경 잔상 수정. ScreenShot 폴더에서 분리. 아이콘 시안 → 실버 확정, `app.ico` 생성. 컴팩트 GUI + 로그 팝업 + 트레이 토스트 + 이징, 받은 파일 창 분리, 세로 배치, Fluent 디자인, 닫기→트레이 |
 | 2026-10-22 | GitHub 비공개 저장소 생성·푸시, 불필요 파일 정리(`fdbb926`) |
-| 2026-10-26 | 이어 작업용 문서(`CLAUDE.md`)와 테스트 도구(`tests/`, `tools/`)를 저장소에 정리 → 같은 날 테스트 도구를 `WorkApps\ScanReceiverTest`로 분리, 빌드 중간 파일 정리 |
+| 2026-10-26 | 이어 작업용 문서(`CLAUDE.md`)와 테스트 도구(`tests/`, `tools/`)를 저장소에 정리 → 같은 날 빌드 중간 파일 정리, 테스트 도구를 `test/` 한 폴더로 모으고 출력도 `test/out/`으로 분리 |
