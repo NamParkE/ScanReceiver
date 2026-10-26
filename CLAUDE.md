@@ -10,7 +10,7 @@
 - 답변·진행 안내는 **한국어**로.
 - 불필요·생성 파일은 지우거나 추적 해제할 때 **같은 커밋에서 `.gitignore`도 갱신**.
 - 디자인 변경은 먼저 **시안을 여러 개** 보여주고 고르게 함(아이콘도 3개 시안 → A안 → 모노톤 3종 → A2 실버로 확정).
-- 사용자가 실행 중인 ScanReceiver는 **끄지 말 것**. `build\ScanReceiver.ini`에는 사용자의 실제 설정(저장 폴더 `Desktop\scan` 등)이 있으니 덮어쓰지 말 것 → 테스트는 `test\run_ftp_test.ps1`(백업·복원함).
+- 사용자가 실행 중인 ScanReceiver는 **끄지 말 것**. `%APPDATA%\ScanReceiver\ScanReceiver.ini`에는 사용자의 실제 설정(저장 폴더 `Desktop\scan` 등)이 있으니 덮어쓰지 말 것 → 테스트는 `test\run_ftp_test.ps1`(`--ini <임시 파일>`로 실행해 사용자 설정을 안 건드림. 한 번에 하나만 실행되는 앱이라 사용자 앱이 켜져 있으면 거부).
 - 화면 캡처는 **앱 창 영역만**. 창 사이 빈 곳에 사용자의 메일 등 개인 화면이 찍힌 적이 있음.
 
 ## 파일 구조
@@ -22,7 +22,8 @@
 | `app.rc`, `ScanReceiver.manifest`, `app.ico` | 아이콘, comctl32 v6, DPI 인식 |
 | `build.bat` / `build_mingw.bat` / `CMakeLists.txt` | MSVC 빌드(검증됨) / MinGW·CMake(**미검증**) |
 | `icon/` | 아이콘 SVG 원본 2개 + `build_icon.py`(Edge 헤드리스로 크기별 렌더 → `app.ico`) |
-| `build/` | 앱 빌드 출력 + 사용자 설정 ini. git 무시. 테스트 산출물은 여기 두지 말 것 |
+| `build/` | 앱 빌드 출력. git 무시. 테스트 산출물은 여기 두지 말 것 |
+| `%APPDATA%\ScanReceiver\ScanReceiver.ini` | 사용자 설정(`ResolveIniPath`). `--ini <경로>`로 바꿀 수 있고, 예전 버전이 exe 옆에 만든 ini는 처음 실행할 때 여기로 옮김 |
 | `test/` | 테스트 도구 전부: `ftp_test.py`(12개 FTP 검사), `run_ftp_test.ps1`(안전하게 실행), `wintool.cpp`(창 조작·화면 캡처 도구), `build_wintool.bat` |
 | `test/out/` | `wintool.exe` 빌드 출력. git 무시 |
 
@@ -94,4 +95,4 @@ test\build_wintool.bat                      :: 화면 확인용 도구 → test\
 | 2026-10-20 | FTP 서버 + Win32 GUI 작성, MSVC 설치·빌드, FTP 테스트 12개 통과. GUI 1차 개선(상태 띠, 아이콘 목록, 로그 필터) |
 | 2026-10-21 | 첫 화면 미표시 버그(자식 미갱신)·크기 변경 잔상 수정. ScreenShot 폴더에서 분리. 아이콘 시안 → 실버 확정, `app.ico` 생성. 컴팩트 GUI + 로그 팝업 + 트레이 토스트 + 이징, 받은 파일 창 분리, 세로 배치, Fluent 디자인, 닫기→트레이 |
 | 2026-10-22 | GitHub 비공개 저장소 생성·푸시, 불필요 파일 정리(`fdbb926`) |
-| 2026-10-26 | 이어 작업용 문서(`CLAUDE.md`)와 테스트 도구(`tests/`, `tools/`)를 저장소에 정리 → 같은 날 빌드 중간 파일 정리, 테스트 도구를 `test/` 한 폴더로 모으고 출력도 `test/out/`으로 분리 |
+| 2026-10-26 | 이어 작업용 문서(`CLAUDE.md`)와 테스트 도구(`tests/`, `tools/`)를 저장소에 정리 → 같은 날 빌드 중간 파일 정리, 테스트 도구를 `test/` 한 폴더로 모으고 출력도 `test/out/`으로 분리. 저장소 공개 + v1.0.0 릴리즈. 설정 파일을 `%APPDATA%\ScanReceiver`로 옮김(기존 ini 자동 이전 확인) |

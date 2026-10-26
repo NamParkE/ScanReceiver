@@ -417,7 +417,40 @@ bool PickFolder(HWND owner, std::wstring& path) {
     return ok;
 }
 
-// ---- settings (ScanReceiver.ini next to the exe) ---------------------------------------------
+// ---- settings (%APPDATA%\ScanReceiver\ScanReceiver.ini) --------------------------------------
+
+// "--ini <path>" overrides the location (tests use it so the user's settings are never touched).
+// Otherwise %APPDATA%\ScanReceiver; an ini left next to the exe by older versions is moved there once.
+std::wstring ResolveIniPath() {
+    int argc = 0;
+    PWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    std::wstring path;
+    for (int i = 1; argv && i + 1 < argc; ++i)
+        if (wcscmp(argv[i], L"--ini") == 0) path = argv[i + 1];
+    LocalFree(argv);
+    if (!path.empty()) return path;
+
+    wchar_t exe[MAX_PATH];
+    GetModuleFileNameW(nullptr, exe, MAX_PATH);
+    std::wstring legacy = exe;
+    legacy = legacy.substr(0, legacy.find_last_of(L'\\') + 1) + L"ScanReceiver.ini";
+
+    PWSTR appData = nullptr;
+    if (FAILED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, nullptr, &appData))) {
+        CoTaskMemFree(appData);
+        return legacy;
+    }
+    std::wstring dir = std::wstring(appData) + L"\\ScanReceiver";
+    CoTaskMemFree(appData);
+    CreateDirectoryW(dir.c_str(), nullptr);
+    path = dir + L"\\ScanReceiver.ini";
+
+    if (GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES &&
+        GetFileAttributesW(legacy.c_str()) != INVALID_FILE_ATTRIBUTES &&
+        !MoveFileExW(legacy.c_str(), path.c_str(), MOVEFILE_COPY_ALLOWED))
+        CopyFileW(legacy.c_str(), path.c_str(), TRUE);  // exe folder not writable: copy instead
+    return path;
+}
 
 std::wstring IniGet(const wchar_t* key, const wchar_t* def) {
     wchar_t buf[1024];
@@ -1623,10 +1656,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
     InitCommonControlsEx(&icc);
 
     g.inst = inst;
-    wchar_t exe[MAX_PATH];
-    GetModuleFileNameW(nullptr, exe, MAX_PATH);
-    g.iniPath = exe;
-    g.iniPath = g.iniPath.substr(0, g.iniPath.find_last_of(L'\\') + 1) + L"ScanReceiver.ini";
+    g.iniPath = ResolveIniPath();
 
     HDC screen = GetDC(nullptr);
     g.dpi = GetDeviceCaps(screen, LOGPIXELSY);

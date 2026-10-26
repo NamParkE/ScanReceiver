@@ -1,4 +1,4 @@
-# Build output (also holds ScanReceiver.ini, which stores the FTP password in plain text)
+# Build output (older versions also kept ScanReceiver.ini here; it now lives in %APPDATA%\ScanReceiver)
 build/
 *.obj
 *.res
