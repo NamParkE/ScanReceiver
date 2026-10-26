@@ -3,7 +3,7 @@
 복합기·스캐너의 **Scan to FTP**로 보낸 파일을 받는 Windows용 C++ Win32 GUI 앱. 사용 설명은 [README.md](README.md), 이 문서는 이어서 개발하는 사람(새 Claude 세션 포함)을 위한 것.
 
 - 저장소: https://github.com/NamParkE/ScanReceiver (비공개, `main`)
-- 로컬: `C:\Users\Administrator\ScanReceiver` (원래 `ScreenShot` 폴더 안에서 시작했다가 분리함 — ScreenShot(C# WPF 캡처 앱)과는 무관)
+- 로컬: `C:\Users\Administrator\WorkApps\ScanReceiver` (원래 `ScreenShot` 폴더 안에서 시작했다가 분리함 — ScreenShot(C# WPF 캡처 앱)과는 무관. 2026-10-26 `WorkApps` 아래로 옮김)
 
 ## 사용자 선호 (지킬 것)
 
